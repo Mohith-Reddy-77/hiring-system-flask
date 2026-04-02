@@ -49,6 +49,8 @@ _USER_PROVIDED_DB = bool(os.getenv('DATABASE_URL'))
 
 from sqlalchemy.exc import OperationalError
 from sqlalchemy import inspect, text
+from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
+import socket
 
 
 # Try to use the configured DATABASE_URL, but fall back to a local SQLite file
@@ -97,8 +99,40 @@ try:
 except Exception as exc:
     # If the user explicitly provided DATABASE_URL but connection failed, fail fast
     if _USER_PROVIDED_DB:
-        print('ERROR: could not connect to configured DATABASE_URL. Aborting startup. Error:', exc)
-        sys.exit(1)
+        # If we failed due to IPv6 / "Network is unreachable" errors, attempt an IPv4 retry
+        msg = str(exc).lower()
+        tried_ipv4 = False
+        if 'network is unreachable' in msg or 'cannot assign requested address' in msg or 'errno' in msg:
+            try:
+                # Try to resolve an IPv4 address for the DB host and retry using libpq's hostaddr option
+                parsed = urlsplit(DATABASE_URL)
+                host = parsed.hostname
+                port = parsed.port or 5432
+                if host:
+                    # get IPv4 addresses only
+                    addrs = socket.getaddrinfo(host, port, family=socket.AF_INET, type=socket.SOCK_STREAM)
+                    if addrs:
+                        # take the first IPv4 address
+                        ipv4 = addrs[0][4][0]
+                        # append hostaddr to the query portion of the URL so libpq will use this numeric address
+                        qs = dict(parse_qsl(parsed.query))
+                        qs['hostaddr'] = ipv4
+                        new_query = urlencode(qs)
+                        rebuilt = urlunsplit((parsed.scheme, parsed.netloc, parsed.path, new_query, parsed.fragment))
+                        print('INFO: Initial DB connect failed; retrying with IPv4 hostaddr=', ipv4)
+                        try:
+                            engine, SessionLocal = _create_engine_and_session(rebuilt)
+                            tried_ipv4 = True
+                            # If we connected, proceed with migrations/creates below by replacing DATABASE_URL
+                            DATABASE_URL = rebuilt
+                        except Exception as exc2:
+                            print('INFO: IPv4 retry also failed:', exc2)
+            except Exception as e:
+                print('INFO: IPv4 fallback resolution attempt failed:', e)
+
+        if not tried_ipv4:
+            print('ERROR: could not connect to configured DATABASE_URL. Aborting startup. Error:', exc)
+            sys.exit(1)
     # Otherwise we are in a dev environment without DATABASE_URL; fall back to SQLite
     print('Warning: could not connect to DATABASE_URL; falling back to local SQLite. Error:', exc)
     DATABASE_URL = 'sqlite:///./dev.db'
