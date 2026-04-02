@@ -110,7 +110,18 @@ except Exception as exc:
                 port = parsed.port or 5432
                 if host:
                     # get IPv4 addresses only
-                    addrs = socket.getaddrinfo(host, port, family=socket.AF_INET, type=socket.SOCK_STREAM)
+                    try:
+                        addrs = socket.getaddrinfo(host, port, family=socket.AF_INET, type=socket.SOCK_STREAM)
+                    except Exception as _gai_err:
+                        # No IPv4 A record available (common when only AAAA exists). Provide a helpful message.
+                        print('INFO: IPv4 fallback resolution attempt failed:', _gai_err)
+                        print('HINT: The database host does not appear to have an IPv4 A record. Your deployment environment may lack IPv6 egress, so connecting to an IPv6-only host fails.')
+                        print('OPTIONS: 1) Use a DB with an IPv4-accessible endpoint (e.g., attach Render Managed Postgres).')
+                        print('         2) Configure a TCP proxy / NAT for IPv6 -> IPv4, or host the DB in a provider with A records.')
+                        print('         3) If you control the DB DNS, add an A record for the host or provide a numeric IPv4 and set `DATABASE_URL` with `hostaddr` manually.')
+                        print('Refer to Render troubleshooting: https://render.com/docs/troubleshooting-deploys')
+                        sys.exit(1)
+
                     if addrs:
                         # take the first IPv4 address
                         ipv4 = addrs[0][4][0]
