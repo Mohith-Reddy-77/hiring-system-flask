@@ -119,3 +119,57 @@ def get_supabase_client():
 
     # Fallback to local filesystem-based stub for development if credentials missing.
     return _LocalSupabaseLike()
+
+
+def supabase_table_select(table, select='*', params=None, limit=None):
+    """Server-side helper: query a Supabase/PostgREST table over HTTPS.
+
+    Returns JSON array of rows. Requires `SUPABASE_URL` and `SUPABASE_KEY` to be set.
+    """
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        raise RuntimeError('SUPABASE_URL and SUPABASE_KEY must be set to query Supabase tables')
+    try:
+        import requests
+    except Exception:
+        raise RuntimeError('requests package is required to query Supabase over HTTP')
+
+    base = SUPABASE_URL.rstrip('/') + '/rest/v1/' + table
+    headers = {
+        'apikey': SUPABASE_KEY,
+        'Authorization': f'Bearer {SUPABASE_KEY}',
+        'Accept': 'application/json'
+    }
+    q = {}
+    if select:
+        q['select'] = select
+    if params:
+        q.update(params)
+    if limit:
+        q['limit'] = str(limit)
+
+    r = requests.get(base, headers=headers, params=q, timeout=10)
+    if r.status_code >= 400:
+        raise RuntimeError(f'Supabase query failed: {r.status_code} {r.text}')
+    return r.json()
+
+
+def supabase_table_insert(table, row):
+    """Insert a row into a Supabase table via PostgREST. Returns inserted row(s)."""
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        raise RuntimeError('SUPABASE_URL and SUPABASE_KEY must be set to insert into Supabase tables')
+    try:
+        import requests
+    except Exception:
+        raise RuntimeError('requests package is required to query Supabase over HTTP')
+
+    base = SUPABASE_URL.rstrip('/') + '/rest/v1/' + table
+    headers = {
+        'apikey': SUPABASE_KEY,
+        'Authorization': f'Bearer {SUPABASE_KEY}',
+        'Content-Type': 'application/json',
+        'Prefer': 'return=representation'
+    }
+    r = requests.post(base, headers=headers, json=row, timeout=10)
+    if r.status_code >= 400:
+        raise RuntimeError(f'Supabase insert failed: {r.status_code} {r.text}')
+    return r.json()

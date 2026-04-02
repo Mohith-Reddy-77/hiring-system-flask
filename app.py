@@ -480,6 +480,28 @@ def admin_jobs():
     return render_template('admin_jobs.html', jobs=out)
 
 
+@app.route('/admin/supabase/<table>')
+@admin_required
+def admin_supabase_table(table):
+    """Admin-only helper to inspect a Supabase table via the HTTP PostgREST API.
+
+    Use this when running the app with Render Postgres as primary but needing
+    occasional reads from Supabase tables (hybrid mode). Requires SUPABASE_URL
+    and SUPABASE_KEY to be set in environment variables (set the key as a
+    secret in Render).
+    """
+    try:
+        from supabase_client import supabase_table_select
+    except Exception as e:
+        return jsonify({'error': 'Supabase helper not available', 'detail': str(e)}), 500
+
+    try:
+        rows = supabase_table_select(table, select='*', limit=100)
+        return jsonify({'table': table, 'count': len(rows), 'rows': rows})
+    except Exception as e:
+        return jsonify({'error': 'Supabase query failed', 'detail': str(e)}), 500
+
+
 @app.route('/admin/candidates')
 @admin_required
 def admin_candidates():
