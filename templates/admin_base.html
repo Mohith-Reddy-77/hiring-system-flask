@@ -1,0 +1,92 @@
+{% extends 'base.html' %}
+{% block content %}
+  <div class="row">
+    <div class="col-md-3">
+      <div class="card p-2">
+        <div class="list-group list-group-flush">
+          <a href="#" class="list-group-item list-group-item-action admin-nav" data-target="dashboard"><i class="bi bi-speedometer2 me-2"></i>Dashboard</a>
+          <a href="#" class="list-group-item list-group-item-action admin-nav" data-target="jobs"><i class="bi bi-briefcase me-2"></i>Jobs</a>
+          <a href="#" class="list-group-item list-group-item-action admin-nav" data-target="candidates"><i class="bi bi-people me-2"></i>Candidates</a>
+          <a href="#" class="list-group-item list-group-item-action admin-nav" data-target="applications"><i class="bi bi-file-earmark-text me-2"></i>Applications</a>
+          <a href="#" class="list-group-item list-group-item-action admin-nav" data-target="interviews"><i class="bi bi-calendar-event me-2"></i>Interviews</a>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-9" id="admin-main">
+      <!-- Dynamic admin content will load here -->
+      <div class="text-center py-5 muted">Loading...</div>
+    </div>
+  </div>
+
+  <script>
+    async function loadAdmin(target) {
+      const main = document.getElementById('admin-main');
+      main.innerHTML = '<div class="text-center py-5 muted">Loading...</div>';
+      try {
+        const res = await fetch(`/admin/content/${target}`);
+        if (!res.ok) throw new Error(res.statusText);
+        const html = await res.text();
+        main.innerHTML = html;
+      } catch (e) {
+        main.innerHTML = `<div class="alert alert-danger">Failed to load: ${e}</div>`;
+      }
+    }
+
+    document.addEventListener('DOMContentLoaded', function(){
+      document.querySelectorAll('.admin-nav').forEach(a=>{
+        a.addEventListener('click', function(ev){
+          ev.preventDefault();
+          document.querySelectorAll('.admin-nav').forEach(x=>x.classList.remove('active'));
+          this.classList.add('active');
+          loadAdmin(this.dataset.target);
+        });
+      });
+      // load dashboard by default
+      const first = document.querySelector('.admin-nav[data-target="dashboard"]');
+      if (first) { first.classList.add('active'); loadAdmin('dashboard'); }
+
+      // Delegate clicks inside the admin main area for XHR-safe links
+      document.getElementById('admin-main').addEventListener('click', function(ev){
+        const el = ev.target.closest && ev.target.closest('.admin-load');
+        if (el) {
+          ev.preventDefault();
+          const url = el.dataset.url;
+          if (url) loadFragmentUrl(url);
+        }
+      });
+
+      // Delegate AJAX form submits inside admin main
+      document.getElementById('admin-main').addEventListener('submit', async function(ev){
+        const form = ev.target.closest && ev.target.closest('.admin-ajax-form');
+        if (form) {
+          ev.preventDefault();
+          const action = form.getAttribute('action') || window.location.href;
+          const method = (form.getAttribute('method') || 'POST').toUpperCase();
+          const formData = new FormData(form);
+          try {
+            const res = await fetch(action, { method, body: formData });
+            if (!res.ok) throw new Error(res.statusText);
+            // after success, reload interviews fragment
+            loadAdmin('interviews');
+          } catch (e) {
+            alert('Request failed: ' + e);
+          }
+        }
+      });
+    });
+
+    async function loadFragmentUrl(url) {
+      const main = document.getElementById('admin-main');
+      main.innerHTML = '<div class="text-center py-5 muted">Loading...</div>';
+      try {
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(res.statusText);
+        const html = await res.text();
+        main.innerHTML = html;
+      } catch (e) {
+        main.innerHTML = `<div class="alert alert-danger">Failed to load: ${e}</div>`;
+      }
+    }
+  </script>
+
+{% endblock %}

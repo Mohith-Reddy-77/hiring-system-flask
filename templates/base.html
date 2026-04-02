@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Hiring System</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet" crossorigin="anonymous">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <style>
+      :root { --brand: #2563eb; --muted: #6b7280; }
+      body { font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; background: #f6f8fb; }
+      .site-wrapper { max-width: 1100px; margin: 28px auto; }
+      .site-card { background: #fff; padding: 28px; border-radius: 12px; box-shadow: 0 8px 24px rgba(15,23,42,0.06); }
+      a { color: var(--brand) }
+      .job-card { border: 1px solid #ecf1fb; padding: 18px; border-radius: 10px; margin-bottom: 16px; background: linear-gradient(180deg,#ffffff,#fbfdff); }
+      .muted { color: var(--muted) }
+      footer { margin-top: 22px; color: var(--muted); font-size: 14px }
+      .hero { background: linear-gradient(90deg, rgba(37,99,235,0.06), rgba(37,99,235,0.02)); padding: 20px; border-radius: 10px; margin-bottom: 18px; }
+      .brand-badge { background: linear-gradient(90deg,#2563eb,#7c3aed); color: #fff; padding: 6px 10px; border-radius: 999px; font-weight:600 }
+      .job-excerpt { color: #374151 }
+      .small-muted { color: #94a3b8; font-size: 13px }
+    </style>
+  </head>
+  <body>
+    <div class="container-fluid bg-white shadow-sm">
+      <nav class="container d-flex justify-content-between align-items-center py-3">
+        <div class="d-flex align-items-center gap-3">
+          <a class="navbar-brand h4 mb-0 d-flex align-items-center gap-2" href="/">
+            <span class="brand-badge">HS</span>
+            <span class="fw-600">Hiring System</span>
+          </a>
+          <a class="small-muted" href="/jobs">Open roles</a>
+        </div>
+        <div class="d-flex align-items-center gap-2">
+          <form method="get" action="/jobs" class="d-none d-md-flex">
+            <input name="q" class="form-control form-control-sm" placeholder="Search jobs" style="width:220px">
+          </form>
+          {% if request.cookies.get('candidate_token') %}
+            <a class="btn btn-sm btn-outline-secondary" href="/candidate/logout">Logout</a>
+          {% else %}
+            <a class="btn btn-sm btn-outline-primary" href="/candidate/login">Candidate</a>
+          {% endif %}
+          {% if request.cookies.get('token') %}
+            <a class="btn btn-sm btn-outline-secondary" href="/admin/logout">Admin</a>
+          {% else %}
+            <a class="btn btn-sm btn-primary" href="/admin/login">Admin</a>
+          {% endif %}
+        </div>
+      </nav>
+    </div>
+
+    <main class="site-wrapper">
+      <div class="site-card">
+        <div class="hero d-flex justify-content-between align-items-center mb-3">
+          <div>
+            <h1 class="h4 mb-1">Find the right role for you</h1>
+            <div class="small-muted">Browse open positions and apply in seconds.</div>
+          </div>
+          <div class="text-end">
+            <a class="btn btn-outline-primary" href="/jobs">Browse Jobs</a>
+          </div>
+        </div>
+        {% block content %}{% endblock %}
+      </div>
+      
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js" crossorigin="anonymous"></script>
+  </body>
+</html>

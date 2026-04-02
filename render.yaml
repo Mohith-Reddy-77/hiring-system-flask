@@ -1,0 +1,27 @@
+# Example Render manifest for local IaC-style deployment.
+# This defines a managed Postgres and a web service that runs the Flask app with gunicorn.
+# NOTE: You may need to adjust `plan`, `region`, and `disk` values for your Render account.
+services:
+  - type: postgres
+    name: hiring-system-db
+    plan: starter
+    disk: 1024
+    # Optional: specify region: e.g., oregon
+    # region: oregon
+
+  - type: web
+    name: hiring-system-web
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: bash scripts/entrypoint.sh
+    # After creating the Postgres service, attach it in the Render dashboard so
+    # Render will automatically provide a `DATABASE_URL` env var to this service.
+    # You can also set other env vars here or in the dashboard (SUPABASE_*, JWT_SECRET, etc.).
+    envVars:
+      - key: SUPABASE_URL
+        value: "https://qfpaprzwjqfzxaewdsix.supabase.co"
+      - key: SUPABASE_KEY
+        value: ""
+      - key: UPLOAD_BUCKET
+        value: "resumes"

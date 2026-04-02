@@ -1,0 +1,26 @@
+{% extends 'base.html' %}
+{% block content %}
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h2 class="h5 mb-0">Applications</h2>
+    <a class="btn btn-sm btn-primary" href="/admin/dashboard">Back</a>
+  </div>
+  <table class="table table-hover">
+    <thead><tr><th>Candidate</th><th>Job</th><th>Score</th><th>Status</th><th>Submitted</th><th>Actions</th></tr></thead>
+    <tbody>
+    {% for a in applications %}
+      <tr>
+        <td>{{ a.candidate_name }}</td>
+        <td>{{ a.job_title }}</td>
+        <td>{{ a.ats_score or 0 }}</td>
+        <td>{{ a.status }}</td>
+        <td>{{ a.created_at }}</td>
+        <td>
+          <a class="btn btn-sm btn-outline-secondary" href="/admin/applications/{{ a.id }}">View</a>
+        </td>
+      </tr>
+    {% else %}
+      <tr><td colspan="5">No applications found.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+{% endblock %}

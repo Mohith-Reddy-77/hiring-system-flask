@@ -1,0 +1,16 @@
+<h4>Candidates</h4>
+<table class="table table-sm">
+  <thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Joined</th></tr></thead>
+  <tbody>
+  {% for c in candidates %}
+    <tr>
+      <td>{{ c.name }}</td>
+      <td>{{ c.email }}</td>
+      <td>{{ c.phone or '' }}</td>
+      <td>{{ c.created_at }}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="4">No candidates</td></tr>
+  {% endfor %}
+  </tbody>
+</table>

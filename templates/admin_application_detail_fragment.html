@@ -1,0 +1,45 @@
+<div>
+  <h4>Application Detail</h4>
+  <dl class="row">
+    <dt class="col-sm-3">Candidate</dt><dd class="col-sm-9">{{ app.candidate_name }} &lt;{{ app.candidate_email }}&gt;</dd>
+    <dt class="col-sm-3">Job</dt><dd class="col-sm-9">{{ app.job_title }}</dd>
+    <dt class="col-sm-3">ATS Score</dt><dd class="col-sm-9">{{ app.ats_score or 0 }}</dd>
+    <dt class="col-sm-3">Status</dt><dd class="col-sm-9">{{ app.status }}</dd>
+    <dt class="col-sm-3">Resume</dt>
+    <dd class="col-sm-9">
+      {% if app.resume_url %}
+        {% set r = app.resume_url %}
+        {% if not (r.startswith('http') or r.startswith('/')) %}
+          {% set r = '/public/' + r.lstrip('/') %}
+        {% endif %}
+        <a href="{{ r }}" target="_blank">Download</a>
+      {% else %}
+        (none)
+      {% endif %}
+    </dd>
+    <dt class="col-sm-3">Cover Letter</dt><dd class="col-sm-9">{{ app.cover_letter }}</dd>
+  </dl>
+
+  {% if app.ats_analysis %}
+    <h5>ATS Analysis</h5>
+    <div class="card mb-3"><div class="card-body"><pre style="white-space:pre-wrap">{{ app.ats_analysis }}</pre></div></div>
+  {% endif %}
+
+  {% if app.candidate_skills %}
+    <h5>Candidate Skills</h5>
+    <p>
+    {% for s in app.candidate_skills %}
+      <span class="badge bg-secondary me-1">{{ s.skill }}{% if s.years %} ({{ s.years }}y){% endif %}</span>
+    {% endfor %}
+    </p>
+  {% endif %}
+
+  <h5>Schedule Interview</h5>
+  <form class="admin-ajax-form" method="post" action="/admin/interviews/schedule">
+    <input type="hidden" name="application_id" value="{{ app.id }}" />
+    <div class="mb-2"><label>When (ISO): <input class="form-control" name="scheduled_for" placeholder="2026-04-03T15:00:00" required></label></div>
+    <div class="mb-2"><label>Notes: <textarea class="form-control" name="notes"></textarea></label></div>
+    <button class="btn btn-primary" type="submit">Schedule</button>
+    <a class="btn btn-link" href="#" onclick="loadAdmin('applications');return false;">Back</a>
+  </form>
+</div>

@@ -1,0 +1,20 @@
+<h4>Jobs</h4>
+<div class="mb-2"><a class="btn btn-sm btn-primary" href="/admin/jobs/new">New Job</a> <a class="btn btn-sm btn-danger" href="/admin/clear-data">Clear Candidates/Applications</a></div>
+<ul class="list-group">
+{% for job in jobs %}
+  <li class="list-group-item d-flex justify-content-between align-items-center">
+    <div>
+      <strong>{{ job.title }}</strong>
+      {% if job.location %}<small class="text-muted"> — {{ job.location }}</small>{% endif %}
+    </div>
+    <div>
+      <a class="btn btn-sm btn-outline-secondary" href="/admin/jobs/{{ job.id }}/edit">Edit</a>
+      <form action="/admin/jobs/{{ job.id }}/delete" method="post" style="display:inline; margin-left:8px">
+        <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirm('Delete job?')">Delete</button>
+      </form>
+    </div>
+  </li>
+{% else %}
+  <li class="list-group-item">No jobs.</li>
+{% endfor %}
+</ul>

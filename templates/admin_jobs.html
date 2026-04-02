@@ -1,0 +1,17 @@
+{% extends 'base.html' %}
+{% block content %}
+  <h2>Manage Jobs</h2>
+  <a href="/admin/jobs/new">New Job</a>
+  <ul>
+  {% for job in jobs %}
+    <li>
+      <strong>{{ job.title }}</strong> — <a href="/admin/jobs/{{ job.id }}/edit">Edit</a>
+      <form action="/admin/jobs/{{ job.id }}/delete" method="post" style="display:inline; margin-left:8px">
+        <button type="submit" onclick="return confirm('Delete?')">Delete</button>
+      </form>
+    </li>
+  {% else %}
+    <li>No jobs.</li>
+  {% endfor %}
+  </ul>
+{% endblock %}

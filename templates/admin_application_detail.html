@@ -1,0 +1,32 @@
+{% extends 'base.html' %}
+{% block content %}
+  <h4>Application Detail</h4>
+  <dl class="row">
+    <dt class="col-sm-3">Candidate</dt><dd class="col-sm-9">{{ app.candidate_name }} &lt;{{ app.candidate_email }}&gt;</dd>
+    <dt class="col-sm-3">Job</dt><dd class="col-sm-9">{{ app.job_title }}</dd>
+    <dt class="col-sm-3">Status</dt><dd class="col-sm-9">{{ app.status }}</dd>
+    <dt class="col-sm-3">Resume</dt>
+    <dd class="col-sm-9">
+      {% if app.resume_url %}
+        {% set r = app.resume_url %}
+        {% if not (r.startswith('http') or r.startswith('/')) %}
+          {% set r = '/public/' + r.lstrip('/') %}
+        {% endif %}
+        <a href="{{ r }}">Download</a>
+      {% else %}
+        (none)
+      {% endif %}
+    </dd>
+    <dt class="col-sm-3">Cover Letter</dt><dd class="col-sm-9">{{ app.cover_letter }}</dd>
+  </dl>
+
+  <h5>Schedule Interview</h5>
+  <form method="post" action="/admin/interviews/schedule">
+    <input type="hidden" name="application_id" value="{{ app.id }}" />
+    <div class="mb-2"><label>When (ISO): <input class="form-control" name="scheduled_for" placeholder="2026-04-03T15:00:00" required></label></div>
+    <div class="mb-2"><label>Notes: <textarea class="form-control" name="notes"></textarea></label></div>
+    <button class="btn btn-primary" type="submit">Schedule</button>
+  </form>
+
+  <a class="btn btn-link mt-3" href="/admin/applications">Back to applications</a>
+{% endblock %}

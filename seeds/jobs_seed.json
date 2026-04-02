@@ -1,0 +1,47 @@
+[
+  {
+    "title": "Software Engineer",
+    "description": "Build and maintain backend services powering our hiring platform.",
+    "location": "Remote",
+    "responsibilities": [
+      "Design, implement and maintain APIs",
+      "Write tests and participate in code reviews",
+      "Collaborate with product and design to ship features"
+    ],
+    "qualifications": [
+      "3+ years backend experience",
+      "Python, Flask, SQLAlchemy",
+      "Familiarity with Postgres"
+    ]
+  },
+  {
+    "title": "Frontend Engineer",
+    "description": "Implement responsive user interfaces and improve UX across the site.",
+    "location": "San Francisco, CA",
+    "responsibilities": [
+      "Build and optimize React components",
+      "Work with designers to implement accessible UIs",
+      "Improve frontend performance and maintainability"
+    ],
+    "qualifications": [
+      "2+ years frontend experience",
+      "React, TypeScript or modern JS",
+      "CSS and accessibility best practices"
+    ]
+  },
+  {
+    "title": "Product Manager",
+    "description": "Lead product definition and roadmaps for our talent platform.",
+    "location": "New York, NY",
+    "responsibilities": [
+      "Define product requirements and success metrics",
+      "Coordinate cross-functional teams",
+      "Drive roadmap and execution"
+    ],
+    "qualifications": [
+      "3+ years product management experience",
+      "Strong communication and prioritization skills",
+      "Experience shipping SaaS products"
+    ]
+  }
+]

@@ -1,0 +1,60 @@
+{% extends 'base.html' %}
+{% block content %}
+  <div class="d-flex justify-content-between align-items-start mb-3">
+    <div>
+      <h2 class="h4 mb-1">{{ job.title }}</h2>
+      <div class="muted">{{ job.location }}</div>
+    </div>
+    <div>
+      <a class="btn btn-outline-secondary" href="/jobs">Back</a>
+    </div>
+  </div>
+  <p>{{ job.description }}</p>
+
+  {% if job.responsibilities %}
+    <h4>Responsibilities</h4>
+    <ul>
+      {% for r in job.responsibilities %}
+        <li>{{ r }}</li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+
+  {% if job.qualifications %}
+    <h4>Qualifications</h4>
+    <ul>
+      {% for q in job.qualifications %}
+        <li>{{ q }}</li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+
+  <hr />
+  <h3 class="h5">Apply</h3>
+  <form action="/applications" method="post" enctype="multipart/form-data" class="row g-3">
+    <input type="hidden" name="jobId" value="{{ job.id }}" />
+    <div class="col-md-6">
+      <label class="form-label">Full name</label>
+      <input class="form-control" name="name" required>
+    </div>
+    <div class="col-md-6">
+      <label class="form-label">Email</label>
+      <input class="form-control" name="email" type="email" required>
+    </div>
+    <div class="col-md-6">
+      <label class="form-label">Phone</label>
+      <input class="form-control" name="phone" required>
+    </div>
+    <div class="col-12">
+      <label class="form-label">Cover letter</label>
+      <textarea class="form-control" name="coverLetter" rows="4"></textarea>
+    </div>
+    <div class="col-12">
+      <label class="form-label">Resume (PDF)</label>
+      <input class="form-control" type="file" name="resume" accept="application/pdf" required>
+    </div>
+    <div class="col-12">
+      <button class="btn btn-primary" type="submit">Submit Application</button>
+    </div>
+  </form>
+{% endblock %}

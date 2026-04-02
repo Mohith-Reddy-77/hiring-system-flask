@@ -1,0 +1,98 @@
+{% extends 'base.html' %}
+{% block content %}
+  <h2>Candidate Dashboard</h2>
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+      <h2 class="h5 mb-0">Welcome {{ candidate.name or 'Candidate' }}</h2>
+      <div class="small-muted">{{ candidate.email }}</div>
+    </div>
+    <div>
+      {% if candidate.skills %}
+        {% for s in candidate.skills %}
+          <span class="badge bg-secondary ms-1">{{ s.skill }}{% if s.years %} • {{ s.years }}y{% endif %}</span>
+        {% endfor %}
+      {% endif %}
+    </div>
+  </div>
+  <h3>Your Applications</h3>
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead><tr><th>Job</th><th>Score</th><th>Status</th><th>Submitted</th><th></th></tr></thead>
+      <tbody>
+      {% for a in applications %}
+        <tr>
+          <td>{{ a.job_title }}</td>
+          <td>{{ a.ats_score or 0 }}</td>
+          <td>{{ a.status }}</td>
+          <td>{{ a.created_at }}</td>
+          <td>
+            <button class="btn btn-sm btn-outline-primary view-job" data-job-id="{{ a.job_id }}">View Job</button>
+            {% if a.resume_url %}
+              {% set r = a.resume_url %}
+              {% if not (r.startswith('http') or r.startswith('/')) %}
+                {% set r = '/public/' + r.lstrip('/') %}
+              {% endif %}
+              <a class="btn btn-sm btn-outline-secondary ms-1" href="{{ r }}" target="_blank">Resume</a>
+            {% endif %}
+          </td>
+        </tr>
+      {% else %}
+        <tr><td colspan="5">No applications yet.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Job Details Modal -->
+  <div class="modal fade" id="jobModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="jobModalTitle">Job Details</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body" id="jobModalBody">
+          <p class="muted">Loading...</p>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', function(){
+      const modalEl = document.getElementById('jobModal');
+      const jobModal = new bootstrap.Modal(modalEl);
+      document.querySelectorAll('.view-job').forEach(btn=>{
+        btn.addEventListener('click', async function(){
+          const id = this.dataset.jobId;
+          const body = document.getElementById('jobModalBody');
+          const title = document.getElementById('jobModalTitle');
+          title.textContent = 'Loading...';
+          body.innerHTML = '<p class="muted">Loading...</p>';
+          jobModal.show();
+          try{
+            const res = await fetch('/jobs/'+id, { headers: { 'Accept': 'application/json' } });
+            if(!res.ok) throw new Error(res.statusText);
+            const data = await res.json();
+            title.textContent = data.title || 'Job Details';
+            let html = `<p>${data.description || ''}</p>`;
+            if(data.responsibilities && data.responsibilities.length){
+              html += '<h6>Responsibilities</h6><ul>' + data.responsibilities.map(r=>`<li>${r}</li>`).join('') + '</ul>';
+            }
+            if(data.qualifications && data.qualifications.length){
+              html += '<h6>Qualifications</h6><ul>' + data.qualifications.map(q=>`<li>${q}</li>`).join('') + '</ul>';
+            }
+            html += `<a class="btn btn-primary mt-2" href="/jobs/${id}">Apply / Open Page</a>`;
+            body.innerHTML = html;
+          }catch(e){
+            title.textContent = 'Error';
+            body.innerHTML = `<div class="alert alert-danger">Failed to load job: ${e}</div>`;
+          }
+        });
+      });
+    });
+  </script>
+{% endblock %}

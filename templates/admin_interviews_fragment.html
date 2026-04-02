@@ -1,0 +1,16 @@
+<h4>Interviews</h4>
+<table class="table table-sm">
+  <thead><tr><th>Candidate</th><th>Job</th><th>When</th><th>Notes</th></tr></thead>
+  <tbody>
+  {% for it in interviews %}
+    <tr>
+      <td>{{ it.candidate_name }}</td>
+      <td>{{ it.job_title }}</td>
+      <td>{{ it.scheduled_for }}</td>
+      <td>{{ it.notes }}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="4">No interviews</td></tr>
+  {% endfor %}
+  </tbody>
+</table>

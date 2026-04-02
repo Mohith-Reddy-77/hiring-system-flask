@@ -1,0 +1,14 @@
+{% extends 'base.html' %}
+{% block content %}
+  <h2>Admin Dashboard</h2>
+  <p>Jobs: {{ stats.jobs }} | Candidates: {{ stats.candidates }} | Applications: {{ stats.applications }} | Interviews: {{ stats.interviews }}</p>
+
+  <h3>Recent Activity</h3>
+  <ul>
+  {% for a in recent_activity %}
+    <li>{{ a.type }} - {{ a.title or a.name }} - {{ a.createdAt }}</li>
+  {% else %}
+    <li>No recent activity.</li>
+  {% endfor %}
+  </ul>
+{% endblock %}

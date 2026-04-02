@@ -1,0 +1,22 @@
+{% extends 'base.html' %}
+{% block content %}
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h2 class="h5 mb-0">Interviews</h2>
+    <a class="btn btn-sm btn-primary" href="/admin/dashboard">Back</a>
+  </div>
+  <table class="table">
+    <thead><tr><th>Candidate</th><th>Job</th><th>When</th><th>Notes</th></tr></thead>
+    <tbody>
+    {% for it in interviews %}
+      <tr>
+        <td>{{ it.candidate_name }}</td>
+        <td>{{ it.job_title }}</td>
+        <td>{{ it.scheduled_for }}</td>
+        <td>{{ it.notes }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="4">No interviews scheduled.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+{% endblock %}

@@ -1,0 +1,22 @@
+{% extends 'base.html' %}
+{% block content %}
+  <h2 class="h5 mb-3">{{ 'Edit' if job else 'New' }} Job</h2>
+  <form method="post" action="{{ action }}" class="row g-3">
+    <div class="col-12">
+      <label class="form-label">Title</label>
+      <input class="form-control" name="title" value="{{ job.title if job else '' }}" required>
+    </div>
+    <div class="col-md-6">
+      <label class="form-label">Location</label>
+      <input class="form-control" name="location" value="{{ job.location if job else '' }}">
+    </div>
+    <div class="col-12">
+      <label class="form-label">Description</label>
+      <textarea class="form-control" name="description" rows="6">{{ job.description if job else '' }}</textarea>
+    </div>
+    <div class="col-12">
+      <button class="btn btn-primary" type="submit">Save</button>
+      <a class="btn btn-secondary ms-2" href="/admin/jobs">Cancel</a>
+    </div>
+  </form>
+{% endblock %}

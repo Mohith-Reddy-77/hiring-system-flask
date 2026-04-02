@@ -1,0 +1,9 @@
+{% extends 'base.html' %}
+{% block content %}
+  <h2 class="h5">Clear Candidates & Applications</h2>
+  <div class="alert alert-warning">This will permanently delete all candidates and applications. Jobs will be preserved. This action cannot be undone.</div>
+  <form method="post" action="/admin/clear-data" onsubmit="return confirm('Permanently delete all candidates and applications?');">
+    <button class="btn btn-danger" type="submit">Yes, delete all candidates and applications</button>
+    <a class="btn btn-secondary ms-2" href="/admin/jobs">Cancel</a>
+  </form>
+{% endblock %}
