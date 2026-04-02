@@ -8,7 +8,7 @@ import json
 
 from config import DATABASE_URL, JWT_SECRET, UPLOAD_BUCKET, USE_LOCAL_STORAGE
 import sys
-from auth import generate_token, admin_required
+from auth import generate_token, admin_required, verify_token
 import bcrypt
 from models import Admin
 from auth import candidate_required, get_candidate_from_token
@@ -16,22 +16,10 @@ from models import Base, Job, Candidate, Application, Interview
 from supabase_client import get_supabase_client
 from ats import calculate_ats_score, extract_skills
 import io
-# PDF library support: prefer PyPDF2 but accept pypdf as an alternative (package name changed historically).
-PdfLib = None
-PdfReader = None
 try:
     import PyPDF2
-    PdfLib = PyPDF2
-    # PyPDF2 may expose PdfReader or PdfFileReader
-    PdfReader = getattr(PyPDF2, 'PdfReader', None) or getattr(PyPDF2, 'PdfFileReader', None)
 except Exception:
-    try:
-        from pypdf import PdfReader as _PdfReader
-        PdfLib = 'pypdf'
-        PdfReader = _PdfReader
-    except Exception:
-        PdfLib = None
-        PdfReader = None
+    PyPDF2 = None
 
 app = Flask(__name__)
 
@@ -49,8 +37,6 @@ _USER_PROVIDED_DB = bool(os.getenv('DATABASE_URL'))
 
 from sqlalchemy.exc import OperationalError
 from sqlalchemy import inspect, text
-from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
-import socket
 
 
 # Try to use the configured DATABASE_URL, but fall back to a local SQLite file
@@ -99,51 +85,8 @@ try:
 except Exception as exc:
     # If the user explicitly provided DATABASE_URL but connection failed, fail fast
     if _USER_PROVIDED_DB:
-        # If we failed due to IPv6 / "Network is unreachable" errors, attempt an IPv4 retry
-        msg = str(exc).lower()
-        tried_ipv4 = False
-        if 'network is unreachable' in msg or 'cannot assign requested address' in msg or 'errno' in msg:
-            try:
-                # Try to resolve an IPv4 address for the DB host and retry using libpq's hostaddr option
-                parsed = urlsplit(DATABASE_URL)
-                host = parsed.hostname
-                port = parsed.port or 5432
-                if host:
-                    # get IPv4 addresses only
-                    try:
-                        addrs = socket.getaddrinfo(host, port, family=socket.AF_INET, type=socket.SOCK_STREAM)
-                    except Exception as _gai_err:
-                        # No IPv4 A record available (common when only AAAA exists). Provide a helpful message.
-                        print('INFO: IPv4 fallback resolution attempt failed:', _gai_err)
-                        print('HINT: The database host does not appear to have an IPv4 A record. Your deployment environment may lack IPv6 egress, so connecting to an IPv6-only host fails.')
-                        print('OPTIONS: 1) Use a DB with an IPv4-accessible endpoint (e.g., attach Render Managed Postgres).')
-                        print('         2) Configure a TCP proxy / NAT for IPv6 -> IPv4, or host the DB in a provider with A records.')
-                        print('         3) If you control the DB DNS, add an A record for the host or provide a numeric IPv4 and set `DATABASE_URL` with `hostaddr` manually.')
-                        print('Refer to Render troubleshooting: https://render.com/docs/troubleshooting-deploys')
-                        sys.exit(1)
-
-                    if addrs:
-                        # take the first IPv4 address
-                        ipv4 = addrs[0][4][0]
-                        # append hostaddr to the query portion of the URL so libpq will use this numeric address
-                        qs = dict(parse_qsl(parsed.query))
-                        qs['hostaddr'] = ipv4
-                        new_query = urlencode(qs)
-                        rebuilt = urlunsplit((parsed.scheme, parsed.netloc, parsed.path, new_query, parsed.fragment))
-                        print('INFO: Initial DB connect failed; retrying with IPv4 hostaddr=', ipv4)
-                        try:
-                            engine, SessionLocal = _create_engine_and_session(rebuilt)
-                            tried_ipv4 = True
-                            # If we connected, proceed with migrations/creates below by replacing DATABASE_URL
-                            DATABASE_URL = rebuilt
-                        except Exception as exc2:
-                            print('INFO: IPv4 retry also failed:', exc2)
-            except Exception as e:
-                print('INFO: IPv4 fallback resolution attempt failed:', e)
-
-        if not tried_ipv4:
-            print('ERROR: could not connect to configured DATABASE_URL. Aborting startup. Error:', exc)
-            sys.exit(1)
+        print('ERROR: could not connect to configured DATABASE_URL. Aborting startup. Error:', exc)
+        sys.exit(1)
     # Otherwise we are in a dev environment without DATABASE_URL; fall back to SQLite
     print('Warning: could not connect to DATABASE_URL; falling back to local SQLite. Error:', exc)
     DATABASE_URL = 'sqlite:///./dev.db'
@@ -289,12 +232,14 @@ def applications():
     cover_letter = form.get('coverLetter')
     job_id = form.get('jobId')
 
-    # Find or create candidate
+    # Find candidate - do NOT auto-create here. Require explicit registration.
     candidate = session.query(Candidate).filter_by(email=email).first()
     if not candidate:
-        candidate = Candidate(name=name, email=email, phone=phone, resumes='[]')
-        session.add(candidate)
-        session.commit()
+        msg = 'Candidate does not exist. Please register before applying.'
+        # If browser form, render registration page with message
+        if request.accept_mimetypes.best == 'text/html' or request.headers.get('Accept', '').find('text/html') != -1:
+            return render_template('candidate_register.html', error=msg), 400
+        return jsonify({'message': msg}), 400
 
     # Extract resume text either from a posted textarea or from uploaded PDF
     resume_text = request.form.get('resumeText', '')
@@ -305,23 +250,13 @@ def applications():
         filename = f"{int(__import__('time').time())}-{resume.filename}"
         data = resume.read()
 
-        # Try to extract text from PDF if a PdfReader implementation is available
+        # Try to extract text from PDF if PyPDF2 is available and file looks like PDF
         text_extracted = ''
-        if PdfReader and resume.filename.lower().endswith('.pdf'):
+        if PyPDF2 and resume.filename.lower().endswith('.pdf'):
             try:
-                # instantiate reader depending on which lib is available
-                if PdfLib == 'pypdf':
-                    reader = PdfReader(io.BytesIO(data))
-                else:
-                    # PdfLib may be the PyPDF2 module
-                    if PdfLib and hasattr(PdfLib, 'PdfReader'):
-                        reader = PdfLib.PdfReader(io.BytesIO(data))
-                    else:
-                        # fallback to using PdfReader class directly
-                        reader = PdfReader(io.BytesIO(data))
-
+                reader = PyPDF2.PdfReader(io.BytesIO(data))
                 pages = []
-                for p in getattr(reader, 'pages', []):
+                for p in reader.pages:
                     try:
                         pages.append(p.extract_text() or '')
                     except Exception:
@@ -480,28 +415,6 @@ def admin_jobs():
     return render_template('admin_jobs.html', jobs=out)
 
 
-@app.route('/admin/supabase/<table>')
-@admin_required
-def admin_supabase_table(table):
-    """Admin-only helper to inspect a Supabase table via the HTTP PostgREST API.
-
-    Use this when running the app with Render Postgres as primary but needing
-    occasional reads from Supabase tables (hybrid mode). Requires SUPABASE_URL
-    and SUPABASE_KEY to be set in environment variables (set the key as a
-    secret in Render).
-    """
-    try:
-        from supabase_client import supabase_table_select
-    except Exception as e:
-        return jsonify({'error': 'Supabase helper not available', 'detail': str(e)}), 500
-
-    try:
-        rows = supabase_table_select(table, select='*', limit=100)
-        return jsonify({'table': table, 'count': len(rows), 'rows': rows})
-    except Exception as e:
-        return jsonify({'error': 'Supabase query failed', 'detail': str(e)}), 500
-
-
 @app.route('/admin/candidates')
 @admin_required
 def admin_candidates():
@@ -657,14 +570,14 @@ def candidate_login():
     session = SessionLocal()
     if request.method == 'GET':
         return render_template('candidate_login.html')
-    # Candidate access: only email required. Do NOT auto-create unknown emails here.
+    # Simplified candidate access: only email required. If candidate does not exist, create a record.
     email = request.form.get('email')
     if not email:
         return render_template('candidate_login.html', error='Email is required')
     candidate = session.query(Candidate).filter_by(email=email).first()
     if not candidate:
-        # Do not create a candidate record on login. Prompt user to register or show not found.
-        return render_template('candidate_login.html', error='User not found. Please register or contact support.')
+        # Do not auto-create candidate on login. Require explicit registration first.
+        return render_template('candidate_login.html', error='Candidate not found. Please register first.'), 400
     token = generate_token({'id': candidate.id, 'email': candidate.email})
     resp = redirect('/candidate/dashboard')
     resp.set_cookie('candidate_token', token, httponly=True, secure=(os.getenv('FLASK_ENV') == 'production'))
@@ -848,7 +761,28 @@ def admin_login():
     if not admin:
         return render_template('admin_login.html', error='Invalid credentials')
 
-    if not bcrypt.checkpw(password.encode('utf-8'), admin.password.encode('utf-8')):
+    # Validate stored password. Some legacy records may store plaintext or
+    # malformed hashes which cause `bcrypt.checkpw` to raise ValueError("Invalid salt").
+    pw_ok = False
+    try:
+        if admin.password:
+            pw_ok = bcrypt.checkpw(password.encode('utf-8'), admin.password.encode('utf-8'))
+    except ValueError:
+        # Stored password is not a valid bcrypt salt/hash. As a compatibility
+        # measure, accept a plaintext match and re-hash it into bcrypt for
+        # future logins.
+        try:
+            if password == admin.password:
+                # re-hash and persist
+                new_hash = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+                admin.password = new_hash
+                session.add(admin)
+                session.commit()
+                pw_ok = True
+        except Exception:
+            pw_ok = False
+
+    if not pw_ok:
         return render_template('admin_login.html', error='Invalid credentials')
 
     token = generate_token({'id': admin.id, 'email': admin.email})
@@ -862,6 +796,60 @@ def admin_logout():
     resp = redirect('/admin/login')
     resp.set_cookie('token', '', expires=0)
     return resp
+
+
+@app.route('/admin/change-password', methods=['GET', 'POST'])
+@admin_required
+def admin_change_password():
+    token = request.cookies.get('token')
+    data = verify_token(token)
+    if not data:
+        return redirect('/admin/login')
+    admin_id = data.get('id')
+    session = SessionLocal()
+    admin = session.get(Admin, admin_id)
+    if not admin:
+        return redirect('/admin/login')
+
+    if request.method == 'GET':
+        return render_template('admin_change_password.html')
+
+    current = request.form.get('current_password', '')
+    new = request.form.get('new_password', '')
+    confirm = request.form.get('confirm_password', '')
+    if not new or new != confirm:
+        from flask import flash
+        flash('New passwords do not match', 'error')
+        return render_template('admin_change_password.html')
+
+    # verify current password (handle legacy plaintext stored password)
+    valid = False
+    try:
+        if admin.password:
+            valid = bcrypt.checkpw(current.encode('utf-8'), admin.password.encode('utf-8'))
+    except ValueError:
+        # legacy plaintext
+        if current == admin.password:
+            valid = True
+
+    if not valid:
+        from flask import flash
+        flash('Current password is incorrect', 'error')
+        return render_template('admin_change_password.html')
+
+    # update password
+    try:
+        new_hash = bcrypt.hashpw(new.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+        admin.password = new_hash
+        session.add(admin)
+        session.commit()
+        from flask import flash
+        flash('Password changed successfully', 'success')
+        return redirect('/admin/dashboard')
+    except Exception as e:
+        from flask import flash
+        flash('Failed to change password', 'error')
+        return render_template('admin_change_password.html')
 
 
 @app.route('/public/<path:filename>')
