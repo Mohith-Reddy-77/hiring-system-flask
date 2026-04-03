@@ -37,12 +37,29 @@ _USER_PROVIDED_DB = bool(os.getenv('DATABASE_URL'))
 
 from sqlalchemy.exc import OperationalError
 from sqlalchemy import inspect, text
+from sqlalchemy.pool import NullPool
 
 
 # Try to use the configured DATABASE_URL, but fall back to a local SQLite file
 # if the configured database is unreachable or misconfigured.
 def _create_engine_and_session(db_url):
-    engine = create_engine(db_url, future=True)
+    # Remote hosted Postgres (e.g., Supabase with a pooler) often limits
+    # the number of concurrent client connections. Use a NullPool for
+    # such pooled endpoints to avoid holding connections in the app's
+    # connection pool (each DB call will open/close a new connection).
+    # For local sqlite/dev URLs, keep the default behavior.
+    engine_kwargs = {'future': True, 'pool_pre_ping': True}
+    # Heuristic: treat Supabase pooler endpoints (contain 'pooler' or 'supabase')
+    # as session-pooled backends where holding pooled connections can exhaust
+    # the pooler. Use NullPool so each DB operation opens/closes a connection
+    # immediately instead of holding it in a queue.
+    if db_url and ('pooler' in db_url or 'supabase' in db_url):
+        engine_kwargs['poolclass'] = NullPool
+    else:
+        # reasonable defaults for persistent DBs; keep small pool to limit connections
+        engine_kwargs.update({'pool_size': 5, 'max_overflow': 5})
+
+    engine = create_engine(db_url, **engine_kwargs)
     SessionLocal = sessionmaker(bind=engine)
     return engine, SessionLocal
 
@@ -165,81 +182,90 @@ def debug_db():
 
 @app.route('/jobs', methods=['GET', 'POST'])
 def jobs():
-    session = SessionLocal()
-    if request.method == 'GET':
-        q = request.args.get('q', '').strip()
-        if q:
-            jobs = session.query(Job).filter(Job.title.ilike(f"%{q}%")).all()
-        else:
-            jobs = session.query(Job).all()
-        out = []
-        for j in jobs:
-            out.append({'id': j.id, 'title': j.title, 'description': j.description, 'location': j.location})
-        # Render template for browser GET
-        if request.accept_mimetypes.best == 'text/html' or request.headers.get('Accept', '').find('text/html') != -1:
-            return render_template('jobs.html', jobs=out, query=q)
-        return jsonify(out)
+    with SessionLocal() as session:
+        if request.method == 'GET':
+            q = request.args.get('q', '').strip()
+            if q:
+                jobs = session.query(Job).filter(Job.title.ilike(f"%{q}%")).all()
+            else:
+                jobs = session.query(Job).all()
+            out = []
+            for j in jobs:
+                out.append({'id': j.id, 'title': j.title, 'description': j.description, 'location': j.location})
+            # Render template for browser GET
+            if request.accept_mimetypes.best == 'text/html' or request.headers.get('Accept', '').find('text/html') != -1:
+                return render_template('jobs.html', jobs=out, query=q)
+            return jsonify(out)
 
-    data = request.json or {}
-    job = Job(
-        title=data.get('title'),
-        description=data.get('description'),
-        location=data.get('location'),
-        responsibilities=json.dumps(data.get('responsibilities') or []),
-        qualifications=json.dumps(data.get('qualifications') or []),
-    )
-    session.add(job)
-    session.commit()
-    return jsonify({'id': job.id}), 201
+        data = request.json or {}
+        job = Job(
+            title=data.get('title'),
+            description=data.get('description'),
+            location=data.get('location'),
+            responsibilities=json.dumps(data.get('responsibilities') or []),
+            qualifications=json.dumps(data.get('qualifications') or []),
+        )
+        session.add(job)
+        session.commit()
+        return jsonify({'id': job.id}), 201
 
 
 @app.route('/jobs/<int:job_id>', methods=['GET', 'PUT', 'DELETE'])
 def job_detail(job_id):
-    session = SessionLocal()
-    job = session.get(Job, job_id)
-    if not job:
-        return jsonify({'error': 'not found'}), 404
-    if request.method == 'GET':
-        data = {'id': job.id, 'title': job.title, 'description': job.description, 'location': job.location}
-        if request.accept_mimetypes.best == 'text/html' or request.headers.get('Accept', '').find('text/html') != -1:
-            return render_template('job_detail.html', job=data)
-        return jsonify(data)
-    if request.method == 'PUT':
-        data = request.json or {}
-        for k, v in data.items():
-            if hasattr(job, k):
-                setattr(job, k, v)
-        session.commit()
-        return jsonify({'id': job.id})
-    if request.method == 'DELETE':
-        session.delete(job)
-        session.commit()
-        return '', 204
+    with SessionLocal() as session:
+        job = session.get(Job, job_id)
+        if not job:
+            return jsonify({'error': 'not found'}), 404
+        if request.method == 'GET':
+            data = {'id': job.id, 'title': job.title, 'description': job.description, 'location': job.location}
+            if request.accept_mimetypes.best == 'text/html' or request.headers.get('Accept', '').find('text/html') != -1:
+                return render_template('job_detail.html', job=data)
+            return jsonify(data)
+        if request.method == 'PUT':
+            data = request.json or {}
+            for k, v in data.items():
+                if hasattr(job, k):
+                    setattr(job, k, v)
+            session.commit()
+            return jsonify({'id': job.id})
+        if request.method == 'DELETE':
+            session.delete(job)
+            session.commit()
+            return '', 204
 
 
 @app.route('/applications', methods=['GET', 'POST'])
 def applications():
-    session = SessionLocal()
-    if request.method == 'GET':
-        apps = session.query(Application).all()
-        return jsonify([{'id': a.id, 'job_id': a.job_id, 'candidate_id': a.candidate_id, 'status': a.status} for a in apps])
+    with SessionLocal() as session:
+        if request.method == 'GET':
+            apps = session.query(Application).all()
+            return jsonify([{'id': a.id, 'job_id': a.job_id, 'candidate_id': a.candidate_id, 'status': a.status} for a in apps])
 
-    # POST - form-data expected with resume file
-    form = request.form
-    name = form.get('name')
-    email = form.get('email')
-    phone = form.get('phone')
-    cover_letter = form.get('coverLetter')
-    job_id = form.get('jobId')
+        # POST - form-data expected with resume file
+        form = request.form
+        name = form.get('name')
+        email = form.get('email')
+        phone = form.get('phone')
+        cover_letter = form.get('coverLetter')
+        job_id = form.get('jobId')
 
-    # Find candidate - do NOT auto-create here. Require explicit registration.
-    candidate = session.query(Candidate).filter_by(email=email).first()
-    if not candidate:
-        msg = 'Candidate does not exist. Please register before applying.'
-        # If browser form, render registration page with message
-        if request.accept_mimetypes.best == 'text/html' or request.headers.get('Accept', '').find('text/html') != -1:
-            return render_template('candidate_register.html', error=msg), 400
-        return jsonify({'message': msg}), 400
+        # Find candidate. If not found, auto-create a minimal candidate record
+        # so applicants can apply without a separate registration step.
+        candidate = session.query(Candidate).filter_by(email=email).first()
+        if not candidate:
+            try:
+                candidate = Candidate(name=name or None, email=email, phone=phone or None, resumes=[], skills=[])
+                session.add(candidate)
+                session.commit()
+            except Exception as e:
+                try:
+                    session.rollback()
+                except Exception:
+                    pass
+                msg = 'Failed to create candidate record.'
+                if request.accept_mimetypes.best == 'text/html' or request.headers.get('Accept', '').find('text/html') != -1:
+                    return render_template('candidate_register.html', error=msg), 500
+                return jsonify({'message': msg}), 500
 
     # Extract resume text either from a posted textarea or from uploaded PDF
     resume_text = request.form.get('resumeText', '')
@@ -409,43 +435,43 @@ def applications():
 @app.route('/admin/jobs')
 @admin_required
 def admin_jobs():
-    session = SessionLocal()
-    jobs = session.query(Job).all()
-    out = [{'id': j.id, 'title': j.title, 'description': j.description, 'location': j.location} for j in jobs]
-    return render_template('admin_jobs.html', jobs=out)
+    with SessionLocal() as session:
+        jobs = session.query(Job).all()
+        out = [{'id': j.id, 'title': j.title, 'description': j.description, 'location': j.location} for j in jobs]
+        return render_template('admin_jobs.html', jobs=out)
 
 
 @app.route('/admin/candidates')
 @admin_required
 def admin_candidates():
-    session = SessionLocal()
-    candidates = session.query(Candidate).order_by(Candidate.created_at.desc()).all()
-    return render_template('admin_candidates.html', candidates=candidates)
+    with SessionLocal() as session:
+        candidates = session.query(Candidate).order_by(Candidate.created_at.desc()).all()
+        return render_template('admin_candidates.html', candidates=candidates)
 
 
 @app.route('/admin/applications')
 @admin_required
 def admin_applications():
-    session = SessionLocal()
-    apps = session.query(Application).order_by(Application.created_at.desc()).all()
-    out = []
-    for a in apps:
-        cand = session.get(Candidate, a.candidate_id)
-        job = session.get(Job, a.job_id)
-        out.append({'id': a.id, 'candidate_name': cand.name if cand else 'Unknown', 'candidate_email': cand.email if cand else '', 'job_title': job.title if job else 'Unknown', 'status': a.status, 'created_at': a.created_at, 'resume_url': a.resume_url, 'cover_letter': a.cover_letter, 'ats_score': getattr(a, 'ats_score', 0)})
-    return render_template('admin_applications.html', applications=out)
+    with SessionLocal() as session:
+        apps = session.query(Application).order_by(Application.created_at.desc()).all()
+        out = []
+        for a in apps:
+            cand = session.get(Candidate, a.candidate_id)
+            job = session.get(Job, a.job_id)
+            out.append({'id': a.id, 'candidate_name': cand.name if cand else 'Unknown', 'candidate_email': cand.email if cand else '', 'job_title': job.title if job else 'Unknown', 'status': a.status, 'created_at': a.created_at, 'resume_url': a.resume_url, 'cover_letter': a.cover_letter, 'ats_score': getattr(a, 'ats_score', 0)})
+        return render_template('admin_applications.html', applications=out)
 
 
 @app.route('/admin/applications/<int:app_id>')
 @admin_required
 def admin_application_detail(app_id):
-    session = SessionLocal()
-    a = session.get(Application, app_id)
-    if not a:
-        return 'Not found', 404
-    cand = session.get(Candidate, a.candidate_id)
-    job = session.get(Job, a.job_id)
-    app_obj = {'id': a.id, 'candidate_name': cand.name if cand else 'Unknown', 'candidate_email': cand.email if cand else '', 'job_title': job.title if job else 'Unknown', 'status': a.status, 'resume_url': a.resume_url, 'cover_letter': a.cover_letter, 'ats_score': getattr(a, 'ats_score', 0), 'ats_analysis': getattr(a, 'ats_analysis', None), 'candidate_skills': getattr(cand, 'skills', None)}
+    with SessionLocal() as session:
+        a = session.get(Application, app_id)
+        if not a:
+            return 'Not found', 404
+        cand = session.get(Candidate, a.candidate_id)
+        job = session.get(Job, a.job_id)
+        app_obj = {'id': a.id, 'candidate_name': cand.name if cand else 'Unknown', 'candidate_email': cand.email if cand else '', 'job_title': job.title if job else 'Unknown', 'status': a.status, 'resume_url': a.resume_url, 'cover_letter': a.cover_letter, 'ats_score': getattr(a, 'ats_score', 0), 'ats_analysis': getattr(a, 'ats_analysis', None), 'candidate_skills': getattr(cand, 'skills', None)}
     # If this is requested as a fragment for the admin shell, return the fragment
     if request.headers.get('X-Requested-With') == 'XMLHttpRequest' or request.args.get('fragment') == '1':
         return render_template('admin_application_detail_fragment.html', app=app_obj)
@@ -455,24 +481,24 @@ def admin_application_detail(app_id):
 @app.route('/admin/interviews')
 @admin_required
 def admin_interviews():
-    session = SessionLocal()
-    interviews = session.query(Interview).order_by(Interview.scheduled_for.desc()).all()
-    out = []
-    for it in interviews:
-        app_rec = session.get(Application, it.application_id)
-        cand = session.get(Candidate, app_rec.candidate_id) if app_rec else None
-        job = session.get(Job, app_rec.job_id) if app_rec else None
-        out.append({'candidate_name': cand.name if cand else 'Unknown', 'job_title': job.title if job else 'Unknown', 'scheduled_for': it.scheduled_for, 'notes': it.notes})
-    return render_template('admin_interviews.html', interviews=out)
+    with SessionLocal() as session:
+        interviews = session.query(Interview).order_by(Interview.scheduled_for.desc()).all()
+        out = []
+        for it in interviews:
+            app_rec = session.get(Application, it.application_id)
+            cand = session.get(Candidate, app_rec.candidate_id) if app_rec else None
+            job = session.get(Job, app_rec.job_id) if app_rec else None
+            out.append({'candidate_name': cand.name if cand else 'Unknown', 'job_title': job.title if job else 'Unknown', 'scheduled_for': it.scheduled_for, 'notes': it.notes})
+        return render_template('admin_interviews.html', interviews=out)
 
 
 @app.route('/admin/interviews/schedule', methods=['POST'])
 @admin_required
 def schedule_interview():
-    session = SessionLocal()
-    application_id = int(request.form.get('application_id'))
-    scheduled_for = request.form.get('scheduled_for')
-    notes = request.form.get('notes')
+    with SessionLocal() as session:
+        application_id = int(request.form.get('application_id'))
+        scheduled_for = request.form.get('scheduled_for')
+        notes = request.form.get('notes')
     try:
         from datetime import datetime
         dt = datetime.fromisoformat(scheduled_for)
@@ -487,101 +513,101 @@ def schedule_interview():
 @app.route('/admin/jobs/new', methods=['GET', 'POST'])
 @admin_required
 def admin_jobs_new():
-    session = SessionLocal()
-    if request.method == 'GET':
-        return render_template('admin_job_form.html', job=None, action='/admin/jobs/new')
-    data = request.form
-    job = Job(title=data.get('title'), description=data.get('description'), location=data.get('location'))
-    session.add(job)
-    session.commit()
-    return redirect('/admin/jobs')
+    with SessionLocal() as session:
+        if request.method == 'GET':
+            return render_template('admin_job_form.html', job=None, action='/admin/jobs/new')
+        data = request.form
+        job = Job(title=data.get('title'), description=data.get('description'), location=data.get('location'))
+        session.add(job)
+        session.commit()
+        return redirect('/admin/jobs')
 
 
 @app.route('/admin/clear-data', methods=['GET', 'POST'])
 @admin_required
 def admin_clear_data():
-    session = SessionLocal()
-    if request.method == 'GET':
-        return render_template('admin_clear_data.html')
-    # POST: delete applications first, then candidates
-    try:
-        session.query(Application).delete()
-        session.query(Candidate).delete()
-        session.commit()
-        flash('All candidates and applications deleted.', 'success')
-    except Exception as e:
-        session.rollback()
-        current_app.logger.error('Failed to clear data: %s', e)
-        flash('Failed to delete data: ' + str(e), 'danger')
-    return redirect('/admin/jobs')
+    with SessionLocal() as session:
+        if request.method == 'GET':
+            return render_template('admin_clear_data.html')
+        # POST: delete applications first, then candidates
+        try:
+            session.query(Application).delete()
+            session.query(Candidate).delete()
+            session.commit()
+            flash('All candidates and applications deleted.', 'success')
+        except Exception as e:
+            session.rollback()
+            current_app.logger.error('Failed to clear data: %s', e)
+            flash('Failed to delete data: ' + str(e), 'danger')
+        return redirect('/admin/jobs')
 
 
 @app.route('/admin/jobs/<int:job_id>/edit', methods=['GET', 'POST'])
 @admin_required
 def admin_jobs_edit(job_id):
-    session = SessionLocal()
-    job = session.get(Job, job_id)
-    if not job:
-        return 'Not found', 404
-    if request.method == 'GET':
-        return render_template('admin_job_form.html', job=job, action=f'/admin/jobs/{job_id}/edit')
-    data = request.form
-    job.title = data.get('title')
-    job.location = data.get('location')
-    job.description = data.get('description')
-    session.commit()
-    return redirect('/admin/jobs')
+    with SessionLocal() as session:
+        job = session.get(Job, job_id)
+        if not job:
+            return 'Not found', 404
+        if request.method == 'GET':
+            return render_template('admin_job_form.html', job=job, action=f'/admin/jobs/{job_id}/edit')
+        data = request.form
+        job.title = data.get('title')
+        job.location = data.get('location')
+        job.description = data.get('description')
+        session.commit()
+        return redirect('/admin/jobs')
 
 
 @app.route('/admin/jobs/<int:job_id>/delete', methods=['POST'])
 @admin_required
 def admin_jobs_delete(job_id):
-    session = SessionLocal()
-    job = session.get(Job, job_id)
-    if job:
-        session.delete(job)
-        session.commit()
-    return redirect('/admin/jobs')
+    with SessionLocal() as session:
+        job = session.get(Job, job_id)
+        if job:
+            session.delete(job)
+            session.commit()
+        return redirect('/admin/jobs')
 
 
 # Candidate auth + dashboard
 @app.route('/candidate/register', methods=['GET', 'POST'])
 def candidate_register():
-    session = SessionLocal()
-    if request.method == 'GET':
-        return render_template('candidate_register.html')
-    name = request.form.get('name')
-    email = request.form.get('email')
-    password = request.form.get('password')
-    if session.query(Candidate).filter_by(email=email).first():
-        return render_template('candidate_register.html', error='Email already registered')
-    pw_hash = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
-    candidate = Candidate(name=name, email=email, password=pw_hash, resumes=[])
-    session.add(candidate)
-    session.commit()
-    token = generate_token({'id': candidate.id, 'email': candidate.email})
-    resp = redirect('/candidate/dashboard')
-    resp.set_cookie('candidate_token', token, httponly=True, secure=(os.getenv('FLASK_ENV') == 'production'))
-    return resp
+    with SessionLocal() as session:
+        if request.method == 'GET':
+            return render_template('candidate_register.html')
+        name = request.form.get('name')
+        email = request.form.get('email')
+        password = request.form.get('password')
+        if session.query(Candidate).filter_by(email=email).first():
+            return render_template('candidate_register.html', error='Email already registered')
+        pw_hash = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+        candidate = Candidate(name=name, email=email, password=pw_hash, resumes=[])
+        session.add(candidate)
+        session.commit()
+        token = generate_token({'id': candidate.id, 'email': candidate.email})
+        resp = redirect('/candidate/dashboard')
+        resp.set_cookie('candidate_token', token, httponly=True, secure=(os.getenv('FLASK_ENV') == 'production'))
+        return resp
 
 
 @app.route('/candidate/login', methods=['GET', 'POST'])
 def candidate_login():
-    session = SessionLocal()
-    if request.method == 'GET':
-        return render_template('candidate_login.html')
-    # Simplified candidate access: only email required. If candidate does not exist, create a record.
-    email = request.form.get('email')
-    if not email:
-        return render_template('candidate_login.html', error='Email is required')
-    candidate = session.query(Candidate).filter_by(email=email).first()
-    if not candidate:
-        # Do not auto-create candidate on login. Require explicit registration first.
-        return render_template('candidate_login.html', error='Candidate not found. Please register first.'), 400
-    token = generate_token({'id': candidate.id, 'email': candidate.email})
-    resp = redirect('/candidate/dashboard')
-    resp.set_cookie('candidate_token', token, httponly=True, secure=(os.getenv('FLASK_ENV') == 'production'))
-    return resp
+    with SessionLocal() as session:
+        if request.method == 'GET':
+            return render_template('candidate_login.html')
+        # Simplified candidate access: only email required. If candidate does not exist, create a record.
+        email = request.form.get('email')
+        if not email:
+            return render_template('candidate_login.html', error='Email is required')
+        candidate = session.query(Candidate).filter_by(email=email).first()
+        if not candidate:
+            # Do not auto-create candidate on login. Require explicit registration first.
+            return render_template('candidate_login.html', error='Candidate not found. Please register first.'), 400
+        token = generate_token({'id': candidate.id, 'email': candidate.email})
+        resp = redirect('/candidate/dashboard')
+        resp.set_cookie('candidate_token', token, httponly=True, secure=(os.getenv('FLASK_ENV') == 'production'))
+        return resp
 
 
 @app.route('/candidate/logout')
@@ -594,17 +620,17 @@ def candidate_logout():
 @app.route('/candidate/dashboard')
 @candidate_required
 def candidate_dashboard():
-    session = SessionLocal()
     tok = get_candidate_from_token()
     if not tok:
         return redirect('/candidate/login')
-    candidate = session.get(Candidate, tok.get('id'))
-    apps = session.query(Application).filter_by(candidate_id=candidate.id).all()
-    apps_out = []
-    for a in apps:
-        job = session.get(Job, a.job_id)
-        apps_out.append({'id': a.id, 'job_id': a.job_id, 'job_title': job.title if job else 'Unknown', 'status': a.status, 'created_at': a.created_at, 'ats_score': getattr(a, 'ats_score', 0), 'resume_url': a.resume_url})
-    return render_template('candidate_dashboard.html', candidate=candidate, applications=apps_out)
+    with SessionLocal() as session:
+        candidate = session.get(Candidate, tok.get('id'))
+        apps = session.query(Application).filter_by(candidate_id=candidate.id).all()
+        apps_out = []
+        for a in apps:
+            job = session.get(Job, a.job_id)
+            apps_out.append({'id': a.id, 'job_id': a.job_id, 'job_title': job.title if job else 'Unknown', 'status': a.status, 'created_at': a.created_at, 'ats_score': getattr(a, 'ats_score', 0), 'resume_url': a.resume_url})
+        return render_template('candidate_dashboard.html', candidate=candidate, applications=apps_out)
 
 
 @app.route('/applications/success')
@@ -640,113 +666,113 @@ def admin_dashboard():
 @app.route('/admin/content/dashboard')
 @admin_required
 def admin_content_dashboard():
-    session = SessionLocal()
-    stats = {
-        'jobs': session.query(Job).count(),
-        'candidates': session.query(Candidate).count(),
-        'applications': session.query(Application).count(),
-        'interviews': session.query(Interview).count(),
-    }
-    recent_apps = session.query(Application).order_by(Application.created_at.desc()).limit(8).all()
-    recent_activity = []
-    for a in recent_apps:
-        cand = session.get(Candidate, a.candidate_id)
-        job = session.get(Job, a.job_id)
-        recent_activity.append({'title': job.title if job else 'Unknown', 'name': cand.name if cand else 'Unknown', 'createdAt': a.created_at})
-    return render_template('admin_dashboard_fragment.html', stats=stats, recent_activity=recent_activity)
+    with SessionLocal() as session:
+        stats = {
+            'jobs': session.query(Job).count(),
+            'candidates': session.query(Candidate).count(),
+            'applications': session.query(Application).count(),
+            'interviews': session.query(Interview).count(),
+        }
+        recent_apps = session.query(Application).order_by(Application.created_at.desc()).limit(8).all()
+        recent_activity = []
+        for a in recent_apps:
+            cand = session.get(Candidate, a.candidate_id)
+            job = session.get(Job, a.job_id)
+            recent_activity.append({'title': job.title if job else 'Unknown', 'name': cand.name if cand else 'Unknown', 'createdAt': a.created_at})
+        return render_template('admin_dashboard_fragment.html', stats=stats, recent_activity=recent_activity)
 
 
 @app.route('/admin/content/candidates')
 @admin_required
 def admin_content_candidates():
-    session = SessionLocal()
-    candidates = session.query(Candidate).order_by(Candidate.created_at.desc()).all()
-    return render_template('admin_candidates_fragment.html', candidates=candidates)
+    with SessionLocal() as session:
+        candidates = session.query(Candidate).order_by(Candidate.created_at.desc()).all()
+        return render_template('admin_candidates_fragment.html', candidates=candidates)
 
 
 @app.route('/admin/content/applications')
 @admin_required
 def admin_content_applications():
-    session = SessionLocal()
-    # Filters: job_id, min_score, max_score, status, q (candidate name/email)
-    q_param = request.args.get('q', '').strip()
-    job_id = request.args.get('job_id')
-    try:
-        min_score = int(request.args.get('min_score')) if request.args.get('min_score') else None
-    except Exception:
-        min_score = None
-    try:
-        max_score = int(request.args.get('max_score')) if request.args.get('max_score') else None
-    except Exception:
-        max_score = None
-    status = request.args.get('status')
-    page = int(request.args.get('page') or 1)
-    per_page = int(request.args.get('per_page') or 25)
-
-    query = session.query(Application)
-    if job_id:
+    with SessionLocal() as session:
+        # Filters: job_id, min_score, max_score, status, q (candidate name/email)
+        q_param = request.args.get('q', '').strip()
+        job_id = request.args.get('job_id')
         try:
-            query = query.filter(Application.job_id == int(job_id))
+            min_score = int(request.args.get('min_score')) if request.args.get('min_score') else None
         except Exception:
-            pass
-    if min_score is not None:
-        query = query.filter(Application.ats_score >= min_score)
-    if max_score is not None:
-        query = query.filter(Application.ats_score <= max_score)
-    if status:
-        query = query.filter(Application.status == status)
-    if q_param:
-        # join Candidate and filter on name or email
-        from sqlalchemy.orm import joinedload
-        query = query.join(Candidate).filter((Candidate.name.ilike(f"%{q_param}%")) | (Candidate.email.ilike(f"%{q_param}%")))
+            min_score = None
+        try:
+            max_score = int(request.args.get('max_score')) if request.args.get('max_score') else None
+        except Exception:
+            max_score = None
+        status = request.args.get('status')
+        page = int(request.args.get('page') or 1)
+        per_page = int(request.args.get('per_page') or 25)
 
-    query = query.order_by(Application.created_at.desc())
-    total = query.count()
-    apps = query.offset((page - 1) * per_page).limit(per_page).all()
-    out = []
-    for a in apps:
-        cand = session.get(Candidate, a.candidate_id)
-        job = session.get(Job, a.job_id)
-        out.append({'id': a.id, 'candidate_name': cand.name if cand else 'Unknown', 'job_title': job.title if job else 'Unknown', 'status': a.status, 'created_at': a.created_at, 'ats_score': getattr(a, 'ats_score', 0)})
-    # pass pagination info to fragment
-    pagination = {'page': page, 'per_page': per_page, 'total': total}
-    return render_template('admin_applications_fragment.html', applications=out, pagination=pagination, filters={'q': q_param, 'job_id': job_id, 'min_score': min_score, 'max_score': max_score, 'status': status})
+        query = session.query(Application)
+        if job_id:
+            try:
+                query = query.filter(Application.job_id == int(job_id))
+            except Exception:
+                pass
+        if min_score is not None:
+            query = query.filter(Application.ats_score >= min_score)
+        if max_score is not None:
+            query = query.filter(Application.ats_score <= max_score)
+        if status:
+            query = query.filter(Application.status == status)
+        if q_param:
+            # join Candidate and filter on name or email
+            from sqlalchemy.orm import joinedload
+            query = query.join(Candidate).filter((Candidate.name.ilike(f"%{q_param}%")) | (Candidate.email.ilike(f"%{q_param}%")))
+
+        query = query.order_by(Application.created_at.desc())
+        total = query.count()
+        apps = query.offset((page - 1) * per_page).limit(per_page).all()
+        out = []
+        for a in apps:
+            cand = session.get(Candidate, a.candidate_id)
+            job = session.get(Job, a.job_id)
+            out.append({'id': a.id, 'candidate_name': cand.name if cand else 'Unknown', 'job_title': job.title if job else 'Unknown', 'status': a.status, 'created_at': a.created_at, 'ats_score': getattr(a, 'ats_score', 0)})
+        # pass pagination info to fragment
+        pagination = {'page': page, 'per_page': per_page, 'total': total}
+        return render_template('admin_applications_fragment.html', applications=out, pagination=pagination, filters={'q': q_param, 'job_id': job_id, 'min_score': min_score, 'max_score': max_score, 'status': status})
 
 
 @app.route('/admin/content/interviews')
 @admin_required
 def admin_content_interviews():
-    session = SessionLocal()
-    interviews = session.query(Interview).order_by(Interview.scheduled_for.desc()).all()
-    out = []
-    for it in interviews:
-        app_rec = session.get(Application, it.application_id)
-        cand = session.get(Candidate, app_rec.candidate_id) if app_rec else None
-        job = session.get(Job, app_rec.job_id) if app_rec else None
-        out.append({'candidate_name': cand.name if cand else 'Unknown', 'job_title': job.title if job else 'Unknown', 'scheduled_for': it.scheduled_for, 'notes': it.notes})
-    return render_template('admin_interviews_fragment.html', interviews=out)
+    with SessionLocal() as session:
+        interviews = session.query(Interview).order_by(Interview.scheduled_for.desc()).all()
+        out = []
+        for it in interviews:
+            app_rec = session.get(Application, it.application_id)
+            cand = session.get(Candidate, app_rec.candidate_id) if app_rec else None
+            job = session.get(Job, app_rec.job_id) if app_rec else None
+            out.append({'candidate_name': cand.name if cand else 'Unknown', 'job_title': job.title if job else 'Unknown', 'scheduled_for': it.scheduled_for, 'notes': it.notes})
+        return render_template('admin_interviews_fragment.html', interviews=out)
 
 
 @app.route('/admin/content/jobs')
 @admin_required
 def admin_content_jobs():
-    session = SessionLocal()
-    jobs = session.query(Job).order_by(Job.created_at.desc()).all()
-    out = [{'id': j.id, 'title': j.title, 'location': j.location} for j in jobs]
-    return render_template('admin_jobs_fragment.html', jobs=out)
+    with SessionLocal() as session:
+        jobs = session.query(Job).order_by(Job.created_at.desc()).all()
+        out = [{'id': j.id, 'title': j.title, 'location': j.location} for j in jobs]
+        return render_template('admin_jobs_fragment.html', jobs=out)
 
 
 @app.route('/admin/content/application/<int:app_id>')
 @admin_required
 def admin_content_application(app_id):
-    session = SessionLocal()
-    a = session.get(Application, app_id)
-    if not a:
-        return ('Not found', 404)
-    cand = session.get(Candidate, a.candidate_id)
-    job = session.get(Job, a.job_id)
-    app_obj = {'id': a.id, 'candidate_name': cand.name if cand else 'Unknown', 'candidate_email': cand.email if cand else '', 'job_title': job.title if job else 'Unknown', 'status': a.status, 'resume_url': a.resume_url, 'cover_letter': a.cover_letter, 'ats_score': getattr(a, 'ats_score', 0), 'ats_analysis': getattr(a, 'ats_analysis', None), 'candidate_skills': getattr(cand, 'skills', None)}
-    return render_template('admin_application_detail_fragment.html', app=app_obj)
+    with SessionLocal() as session:
+        a = session.get(Application, app_id)
+        if not a:
+            return ('Not found', 404)
+        cand = session.get(Candidate, a.candidate_id)
+        job = session.get(Job, a.job_id)
+        app_obj = {'id': a.id, 'candidate_name': cand.name if cand else 'Unknown', 'candidate_email': cand.email if cand else '', 'job_title': job.title if job else 'Unknown', 'status': a.status, 'resume_url': a.resume_url, 'cover_letter': a.cover_letter, 'ats_score': getattr(a, 'ats_score', 0), 'ats_analysis': getattr(a, 'ats_analysis', None), 'candidate_skills': getattr(cand, 'skills', None)}
+        return render_template('admin_application_detail_fragment.html', app=app_obj)
 
 
 @app.route('/admin/login', methods=['GET', 'POST'])
@@ -756,39 +782,39 @@ def admin_login():
 
     email = request.form.get('email')
     password = request.form.get('password')
-    session = SessionLocal()
-    admin = session.query(Admin).filter_by(email=email).first()
-    if not admin:
-        return render_template('admin_login.html', error='Invalid credentials')
+    with SessionLocal() as session:
+        admin = session.query(Admin).filter_by(email=email).first()
+        if not admin:
+            return render_template('admin_login.html', error='Invalid credentials')
 
-    # Validate stored password. Some legacy records may store plaintext or
-    # malformed hashes which cause `bcrypt.checkpw` to raise ValueError("Invalid salt").
-    pw_ok = False
-    try:
-        if admin.password:
-            pw_ok = bcrypt.checkpw(password.encode('utf-8'), admin.password.encode('utf-8'))
-    except ValueError:
-        # Stored password is not a valid bcrypt salt/hash. As a compatibility
-        # measure, accept a plaintext match and re-hash it into bcrypt for
-        # future logins.
+        # Validate stored password. Some legacy records may store plaintext or
+        # malformed hashes which cause `bcrypt.checkpw` to raise ValueError("Invalid salt").
+        pw_ok = False
         try:
-            if password == admin.password:
-                # re-hash and persist
-                new_hash = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
-                admin.password = new_hash
-                session.add(admin)
-                session.commit()
-                pw_ok = True
-        except Exception:
-            pw_ok = False
+            if admin.password:
+                pw_ok = bcrypt.checkpw(password.encode('utf-8'), admin.password.encode('utf-8'))
+        except ValueError:
+            # Stored password is not a valid bcrypt salt/hash. As a compatibility
+            # measure, accept a plaintext match and re-hash it into bcrypt for
+            # future logins.
+            try:
+                if password == admin.password:
+                    # re-hash and persist
+                    new_hash = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+                    admin.password = new_hash
+                    session.add(admin)
+                    session.commit()
+                    pw_ok = True
+            except Exception:
+                pw_ok = False
 
-    if not pw_ok:
-        return render_template('admin_login.html', error='Invalid credentials')
+        if not pw_ok:
+            return render_template('admin_login.html', error='Invalid credentials')
 
-    token = generate_token({'id': admin.id, 'email': admin.email})
-    resp = redirect('/admin/dashboard')
-    resp.set_cookie('token', token, httponly=True, secure=(os.getenv('FLASK_ENV') == 'production'))
-    return resp
+        token = generate_token({'id': admin.id, 'email': admin.email})
+        resp = redirect('/admin/dashboard')
+        resp.set_cookie('token', token, httponly=True, secure=(os.getenv('FLASK_ENV') == 'production'))
+        return resp
 
 
 @app.route('/admin/logout')
@@ -806,10 +832,10 @@ def admin_change_password():
     if not data:
         return redirect('/admin/login')
     admin_id = data.get('id')
-    session = SessionLocal()
-    admin = session.get(Admin, admin_id)
-    if not admin:
-        return redirect('/admin/login')
+    with SessionLocal() as session:
+        admin = session.get(Admin, admin_id)
+        if not admin:
+            return redirect('/admin/login')
 
     if request.method == 'GET':
         return render_template('admin_change_password.html')

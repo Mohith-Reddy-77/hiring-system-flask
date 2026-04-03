@@ -16,7 +16,7 @@
           <div style="max-width:78%">
             <h3 class="h5 mb-1">{{ job.title }}</h3>
             <div class="small-muted mb-2">{{ job.location }}</div>
-            <p class="job-excerpt">{{ job.description[:260] }}{% if job.description|length > 260 %}…{% endif %}</p>
+            <p class="job-excerpt">{{ (job.description or '')[:260] }}{% if job.description and job.description|length > 260 %}…{% endif %}</p>
           </div>
           <div class="text-end">
             <a class="btn btn-primary btn-sm mb-2" href="/jobs/{{ job.id }}">View & Apply</a>

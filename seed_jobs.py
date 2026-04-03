@@ -21,26 +21,25 @@ def load_seed(path='seeds/jobs_seed.json'):
 
 def seed_jobs():
     Base.metadata.create_all(bind=engine)
-    session = SessionLocal()
     data = load_seed()
     inserted = 0
-    for item in data:
-        title = item.get('title')
-        # avoid duplicates by title
-        exists = session.query(Job).filter_by(title=title).first()
-        if exists:
-            continue
-        job = Job(
-            title=title,
-            description=item.get('description'),
-            location=item.get('location'),
-            responsibilities=item.get('responsibilities') or [],
-            qualifications=item.get('qualifications') or []
-        )
-        session.add(job)
-        inserted += 1
-    session.commit()
-    session.close()
+    with SessionLocal() as session:
+        for item in data:
+            title = item.get('title')
+            # avoid duplicates by title
+            exists = session.query(Job).filter_by(title=title).first()
+            if exists:
+                continue
+            job = Job(
+                title=title,
+                description=item.get('description'),
+                location=item.get('location'),
+                responsibilities=item.get('responsibilities') or [],
+                qualifications=item.get('qualifications') or []
+            )
+            session.add(job)
+            inserted += 1
+        session.commit()
     print(f"Seed complete — inserted {inserted} new jobs.")
 
 
